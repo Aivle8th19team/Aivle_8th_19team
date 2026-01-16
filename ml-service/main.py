@@ -1,14 +1,13 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-import joblib
-import pandas as pd
-import numpy as np
+from fastapi.middleware.cors import CORSMiddleware
 import os
+
+# 모듈 불러오기 (배터리 예측 로직)
+import battery 
 
 app = FastAPI()
 
-from fastapi.middleware.cors import CORSMiddleware
-
+# CORS 설정 (프론트엔드에서 접근 허용)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,87 +16,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-import os
+# 서버 시작 시 모델 로딩
+@app.on_event("startup")
+def startup_event():
+    print("서버 시작: 모델 로딩 중...")
+    battery.load_battery_models()
 
-# Get the directory where main.py is located
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+@app.get("/")
+def read_root():
+    return {"message": "ML Service API is running"}
 
-# Load models using absolute paths
-MODEL_PATH = os.path.join(BASE_DIR, "best_model.pkl")
-SCALER_PATH = os.path.join(BASE_DIR, "scaler.pkl")
-ENCODER_PATH = os.path.join(BASE_DIR, "label_encoder.pkl")
-
-model = None
-scaler = None
-encoder = None
-
-def load_models():
-    global model, scaler, encoder
-    try:
-        model = joblib.load(MODEL_PATH)
-        scaler = joblib.load(SCALER_PATH)
-        encoder = joblib.load(ENCODER_PATH)
-        print("Models loaded successfully")
-    except Exception as e:
-        print(f"Error loading models: {e}")
-
-load_models()
-
-class PredictionRequest(BaseModel):
-    Speed: int
-    Length: float
-    RealPower: float
-    SetFrequency: int = 1000
-    SetDuty: int = 100
-    SetPower: int
-    GateOnTime: int
-
+# 배터리 예측 엔드포인트
 @app.post("/predict")
-def predict(data: PredictionRequest):
-    if not model or not scaler:
-        raise HTTPException(status_code=500, detail="Models not loaded")
-    
-    # Feature Engineering
-    # 12 Features total:
-    # Original: Speed, Length, RealPower, SetFrequency, SetDuty, SetPower, GateOnTime
-    # Engineered: PowerEfficiency, PowerDifference, DutyPowerRatio, GateOnTimeRatio, SpeedLengthRatio
-    
+def predict_endpoint(data: battery.BatteryPredictionRequest):
     try:
-        df = pd.DataFrame([data.dict()])
-        
-        # Calculate engineered features
-        df['PowerEfficiency'] = df['RealPower'] / (df['SetPower'] + 1)
-        df['PowerDifference'] = df['RealPower'] - df['SetPower']
-        df['DutyPowerRatio'] = df['SetDuty'] * df['SetPower']
-        df['GateOnTimeRatio'] = df['GateOnTime'] / (df['Length'] + 1)
-        df['SpeedLengthRatio'] = df['Speed'] * df['Length']
-        
-        # Ensure correct column order
-        feature_order = [
-            'Speed', 'Length', 'RealPower', 'SetFrequency', 'SetDuty', 'SetPower', 'GateOnTime',
-            'PowerEfficiency', 'PowerDifference', 'DutyPowerRatio', 'GateOnTimeRatio', 'SpeedLengthRatio'
-        ]
-        
-        X = df[feature_order]
-        X_scaled = scaler.transform(X)
-        
-        prediction = model.predict(X_scaled)
-        prediction_label = encoder.inverse_transform(prediction)[0]
-        
-        # Probability if available
-        # prediction_proba = model.predict_proba(X_scaled).max()
-        
-        return {
-            "prediction": prediction_label,
-            # "confidence": float(prediction_proba)
-        }
+        # battery 모듈의 예측 함수 호출
+        result = battery.predict_battery_quality(data)
+        return {"prediction": result}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "models_loaded": model is not None}
+    return {
+        "status": "ok", 
+        "models_loaded": battery.model is not None
+    }
 
 if __name__ == "__main__":
     import uvicorn
+    # 모든 네트워크 인터페이스에서 접근 가능하도록 0.0.0.0 설정
     uvicorn.run(app, host="0.0.0.0", port=8000)
