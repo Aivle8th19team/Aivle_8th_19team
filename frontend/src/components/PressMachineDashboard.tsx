@@ -12,24 +12,25 @@ import {
   Legend,
 } from "recharts";
 import {
-  RefreshCw,
   Activity,
   AlertTriangle,
   CheckCircle2,
   Factory,
-  Upload,
   Image as ImageIcon,
+  RefreshCw,
+  RotateCcw,
 } from "lucide-react";
 
 interface DefectData {
   predicted_class: string;
   confidence: number;
   all_scores: Record<string, number>;
-  image_base64?: string;
-  mode?: string;
-  note?: string;
+  image_base64?: string | null;
+  note?: string | null;
   model_input_shape?: number[];
   sim_image_shape?: number[];
+  source?: string;
+  sequence?: { index_next: number; count: number };
 }
 
 interface VibrationData {
@@ -52,21 +53,33 @@ const DEFECT_TYPES = [
 ];
 
 const API_BASE = "http://localhost:8000";
-
-// ✅ 서버가 매번 같은 값 주는 경우에도 “움직이는 것처럼” 보이게 할지 (원하면 true)
 const DEMO_RANDOM_ON_SAME_VALUE = false;
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
-export function PressMachineDashboard() {
-  // Image Upload State
-  const [uploadedImage, setUploadedImage] = useState<DefectData | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const [dragActive, setDragActive] = useState(false);
+function nowHHMMSS() {
+  const now = new Date();
+  return `${now.getHours()}:${String(now.getMinutes()).padStart(2, "0")}:${String(
+    now.getSeconds()
+  ).padStart(2, "0")}`;
+}
 
-  // Vibration Monitoring State
+export function PressMachineDashboard() {
+  // ✅ Auto Image
+  const [autoImage, setAutoImage] = useState<DefectData | null>(null);
+  const [isImageLoading, setIsImageLoading] = useState(false);
+  const [imageLastUpdated, setImageLastUpdated] = useState<string>("--:--:--");
+
+  // ✅ 누적 분포(샘플 랜덤 제거)
+  const [defectAccum, setDefectAccum] = useState<Record<string, number>>(() => {
+    const init: Record<string, number> = {};
+    DEFECT_TYPES.forEach((k) => (init[k] = 0));
+    return init;
+  });
+
+  // ✅ Vibration
   const [vibration, setVibration] = useState<VibrationData | null>(null);
   const [vibrationHistory, setVibrationHistory] = useState<
     { time: string; value: number }[]
@@ -74,20 +87,10 @@ export function PressMachineDashboard() {
   const [sensorHistory, setSensorHistory] = useState<
     { time: string; sensor_0: number; sensor_1: number; sensor_2: number }[]
   >([]);
-
-  // ✅ 마지막 업데이트 시간 표시
   const [lastUpdated, setLastUpdated] = useState<string>("--:--:--");
 
-  // ✅ 이전 값(서버가 고정값 줄 때 감지용)
-  const prevRef = useRef<{ err?: number; s0?: number; s1?: number; s2?: number }>({});
-
-  const defectDistribution = useMemo(
-    () =>
-      DEFECT_TYPES.map((type) => ({
-        name: type,
-        value: Math.floor(Math.random() * 50) + 10,
-      })),
-    []
+  const prevRef = useRef<{ err?: number; s0?: number; s1?: number; s2?: number }>(
+    {}
   );
 
   const statusBadge = useMemo(() => {
@@ -105,65 +108,76 @@ export function PressMachineDashboard() {
     };
   }, [vibration?.is_anomaly]);
 
-  // ---------------------------
-  // Image Upload / Sim Predict
-  // ---------------------------
-  const handleImagePredict = async (file?: File) => {
-    setIsUploading(true);
+  const defectDistribution = useMemo(() => {
+    return DEFECT_TYPES.map((type) => ({
+      name: type,
+      value: Number(defectAccum[type] ?? 0),
+    }));
+  }, [defectAccum]);
 
+  const resetDefectDistribution = () => {
+    setDefectAccum(() => {
+      const init: Record<string, number> = {};
+      DEFECT_TYPES.forEach((k) => (init[k] = 0));
+      return init;
+    });
+  };
+
+  // ---------------------------
+  // ✅ Auto Image Predict (폴링)
+  // ---------------------------
+  const fetchPressImage = async () => {
+    setIsImageLoading(true);
     try {
-      const url = `${API_BASE}/api/v1/smartfactory/press/image`;
+      const res = await fetch(`${API_BASE}/api/v1/smartfactory/press/image`, {
+        method: "POST",
+      });
 
-      let response: Response;
-
-      if (file) {
-        const formData = new FormData();
-        formData.append("file", file);
-
-        response = await fetch(url, { method: "POST", body: formData });
-      } else {
-        response = await fetch(url, { method: "POST" });
+      if (!res.ok) {
+        const t = await res.text().catch(() => "");
+        throw new Error(`API ${res.status}: ${t || res.statusText}`);
       }
 
-      if (!response.ok) {
-        const t = await response.text().catch(() => "");
-        throw new Error(`API ${response.status}: ${t || response.statusText}`);
-      }
+      const data = (await res.json()) as DefectData;
+      setAutoImage(data);
 
-      const data = (await response.json()) as DefectData;
-      setUploadedImage(data);
-    } catch (error) {
-      console.error("Failed to upload/predict image:", error);
+      // ✅ 분포 누적: all_scores 확률을 누적
+      setDefectAccum((prev) => {
+        const next = { ...prev };
+        for (const k of DEFECT_TYPES) {
+          const add = typeof data.all_scores?.[k] === "number" ? data.all_scores[k] : 0;
+          next[k] = (next[k] ?? 0) + add;
+        }
+        return next;
+      });
+
+      setImageLastUpdated(nowHHMMSS());
+    } catch (e) {
+      console.error("Failed to fetch press image:", e);
     } finally {
-      setIsUploading(false);
+      setIsImageLoading(false);
     }
   };
 
-  // Drag and Drop Handlers
-  const handleDrag = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") setDragActive(true);
-    else if (e.type === "dragleave") setDragActive(false);
-  };
+  useEffect(() => {
+    let mounted = true;
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleImagePredict(e.dataTransfer.files[0]);
-    }
-  };
+    const tick = async () => {
+      if (!mounted) return;
+      await fetchPressImage();
+    };
 
-  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      handleImagePredict(e.target.files[0]);
-    }
-  };
+    tick();
+    const t = setInterval(tick, 2000);
+    return () => {
+      mounted = false;
+      clearInterval(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---------------------------
-  // Vibration Monitoring
+  // ✅ Vibration Monitoring
   // ---------------------------
   useEffect(() => {
     let mounted = true;
@@ -182,15 +196,9 @@ export function PressMachineDashboard() {
 
         const data = (await response.json()) as VibrationData;
 
-        const now = new Date();
-        const timeStr = `${now.getHours()}:${String(now.getMinutes()).padStart(
-          2,
-          "0"
-        )}:${String(now.getSeconds()).padStart(2, "0")}`;
-
+        const timeStr = nowHHMMSS();
         if (!mounted) return;
 
-        // --- sensor values 파싱 ---
         const sv = data.sensor_values || {};
         let s0 =
           typeof (sv as any).sensor_0 === "number" ? (sv as any).sensor_0 : 0;
@@ -200,10 +208,10 @@ export function PressMachineDashboard() {
           typeof (sv as any).sensor_2 === "number" ? (sv as any).sensor_2 : 0;
 
         let err =
-          typeof data.reconstruction_error === "number" ? data.reconstruction_error : 0;
+          typeof data.reconstruction_error === "number"
+            ? data.reconstruction_error
+            : 0;
 
-        // ✅ 서버가 매번 같은 값 주면(시뮬 고정) 차트가 “멈춘 것처럼” 보여서,
-        // 원하면 약간 흔들림 추가 (데모용)
         if (DEMO_RANDOM_ON_SAME_VALUE) {
           const prev = prevRef.current;
           const same =
@@ -218,12 +226,11 @@ export function PressMachineDashboard() {
           prevRef.current = { err, s0, s1, s2 };
         }
 
-        // state 업데이트
         setVibration(data);
         setLastUpdated(timeStr);
 
         setVibrationHistory((prev) =>
-          [...prev, { time: timeStr, value: err }].slice(-30) // ✅ 20 -> 30개로
+          [...prev, { time: timeStr, value: err }].slice(-30)
         );
 
         setSensorHistory((prev) =>
@@ -233,12 +240,11 @@ export function PressMachineDashboard() {
         );
       } catch (error) {
         console.error("Failed to fetch vibration data:", error);
-        // ✅ 실패해도 UI가 “죽은 것처럼” 보이지 않게 lastUpdated는 유지
       }
     };
 
     fetchVibrationData();
-    const interval = setInterval(fetchVibrationData, 1000); // ✅ 2초 → 1초
+    const interval = setInterval(fetchVibrationData, 1000);
     return () => {
       mounted = false;
       clearInterval(interval);
@@ -259,7 +265,7 @@ export function PressMachineDashboard() {
                 AI 결함 검출 대시보드
               </h1>
               <p className="text-black text-sm mt-1">
-                프레스 공정 실시간 모니터링 시스템
+                프레스 공정 자동 예측(이미지) + 실시간 모니터링(진동)
               </p>
             </div>
           </div>
@@ -278,14 +284,18 @@ export function PressMachineDashboard() {
             </div>
 
             <div className="px-3 py-2 rounded-xl bg-white border border-black/15 text-black">
-              Last update: <span className="font-mono">{lastUpdated}</span>
+              Vibration update: <span className="font-mono">{lastUpdated}</span>
+            </div>
+
+            <div className="px-3 py-2 rounded-xl bg-white border border-black/15 text-black">
+              Image update: <span className="font-mono">{imageLastUpdated}</span>
             </div>
           </div>
         </div>
 
         {/* Main Grid */}
         <div className="grid grid-cols-12 gap-6">
-          {/* Left: Image */}
+          {/* ✅ Image + Result (Welding 스타일) */}
           <div className="col-span-12 lg:col-span-6 space-y-6">
             <div className="rounded-2xl border border-black/10 bg-white shadow-sm">
               <div className="px-6 pt-6 pb-4 flex items-center justify-between">
@@ -293,100 +303,75 @@ export function PressMachineDashboard() {
                   <ImageIcon className="w-4 h-4 text-blue-600" />
                   이미지 결함 검출 (CNN)
                 </h3>
-                <span className="text-xs px-2 py-1 rounded-lg bg-white border border-black/10 text-black">
-                  Upload / Sim
-                </span>
+
+                <button
+                  onClick={fetchPressImage}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white hover:bg-black/5 border border-black/15 text-black transition-colors"
+                >
+                  <RefreshCw className={cn("w-4 h-4", isImageLoading && "animate-spin")} />
+                  새 이미지
+                </button>
               </div>
 
-              {/* Dropzone */}
               <div className="px-6 pb-6">
-                <div
-                  className={cn(
-                    "border-2 border-dashed rounded-2xl p-7 text-center transition-all",
-                    dragActive
-                      ? "border-blue-600 bg-blue-50"
-                      : "border-black/20 bg-white hover:border-black/30"
-                  )}
-                  onDragEnter={handleDrag}
-                  onDragLeave={handleDrag}
-                  onDragOver={handleDrag}
-                  onDrop={handleDrop}
-                >
-                  <Upload className="w-10 h-10 mx-auto mb-3 text-black" />
-                  <p className="text-black font-medium">
-                    이미지를 드래그하거나 클릭하여 업로드
-                  </p>
-                  <p className="text-black text-sm mt-1">(jpg/png 등 이미지 파일)</p>
-
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleFileInput}
-                    className="hidden"
-                    id="file-upload"
-                  />
-                  <div className="mt-4 flex items-center justify-center gap-3">
-                    <label
-                      htmlFor="file-upload"
-                      className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white cursor-pointer transition-colors"
-                    >
-                      파일 선택
-                    </label>
-
-                    <button
-                      onClick={() => handleImagePredict(undefined)}
-                      className="px-4 py-2 rounded-xl bg-white hover:bg-black/5 border border-black/15 text-black transition-colors"
-                    >
-                      시뮬로 테스트
-                    </button>
-                  </div>
-                </div>
-
-                {isUploading && (
-                  <div className="mt-5 text-center text-black">
-                    <RefreshCw className="w-6 h-6 mx-auto animate-spin mb-2 text-black" />
-                    분석 중...
-                  </div>
-                )}
-
-                {uploadedImage && !isUploading && (
-                  <div className="mt-6 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Left: Image */}
+                  <div>
                     <div className="rounded-2xl overflow-hidden border border-black/10 bg-white">
-                      <div className="aspect-video">
-                        {uploadedImage.image_base64 ? (
+                      <div className="bg-black/90 p-3 rounded-2xl">
+                        {autoImage?.image_base64 ? (
                           <img
-                            src={`data:image/jpeg;base64,${uploadedImage.image_base64}`}
-                            alt="Uploaded"
-                            className="w-full h-full object-contain"
+                            src={`data:image/jpeg;base64,${autoImage.image_base64}`}
+                            alt="Auto"
+                            className="w-full h-64 object-contain rounded-xl bg-black"
                           />
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center text-black text-sm">
-                            (시뮬 입력: 이미지 미표시)
+                          <div className="h-64 flex items-center justify-center text-white/70 text-sm px-4 text-center">
+                            이미지 없음
                           </div>
                         )}
                       </div>
                     </div>
 
+                    <div className="mt-2 text-xs text-black/70">
+                      source:{" "}
+                      <span className="font-mono text-black">{autoImage?.source ?? "-"}</span>
+                      {autoImage?.sequence ? (
+                        <span className="ml-2">
+                          ({autoImage.sequence.count}장 | next:{" "}
+                          <span className="font-mono">{autoImage.sequence.index_next}</span>)
+                        </span>
+                      ) : null}
+                    </div>
+                    {autoImage?.note ? (
+                      <div className="mt-1 text-xs text-black/50">{autoImage.note}</div>
+                    ) : null}
+                  </div>
+
+                  {/* Right: Result */}
+                  <div className="space-y-4">
                     <div className="rounded-2xl border border-black/10 bg-white p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <p className="text-xs text-black">예측 결과</p>
-                          <p className="text-xl font-bold text-black mt-1">
-                            {uploadedImage.predicted_class}
+                          <p className="text-xs text-black/70">예측 결과</p>
+                          <p className="text-2xl font-extrabold text-black mt-1">
+                            {autoImage?.predicted_class ?? "-"}
                           </p>
                         </div>
 
                         <div className="text-right">
-                          <p className="text-xs text-black">Confidence</p>
+                          <p className="text-xs text-black/70">Confidence</p>
                           <p
                             className={cn(
-                              "text-xl font-bold mt-1",
-                              uploadedImage.confidence >= 0.8
+                              "text-2xl font-extrabold mt-1",
+                              (autoImage?.confidence ?? 0) >= 0.8
                                 ? "text-emerald-700"
                                 : "text-amber-700"
                             )}
                           >
-                            {(uploadedImage.confidence * 100).toFixed(1)}%
+                            {typeof autoImage?.confidence === "number"
+                              ? `${(autoImage.confidence * 100).toFixed(1)}%`
+                              : "-"}
                           </p>
                         </div>
                       </div>
@@ -398,13 +383,13 @@ export function PressMachineDashboard() {
                       </h4>
 
                       <div className="space-y-2">
-                        {Object.entries(uploadedImage.all_scores || {}).map(
+                        {Object.entries(autoImage?.all_scores || {}).map(
                           ([className, score]) => (
                             <div
                               key={className}
                               className="flex items-center justify-between gap-3"
                             >
-                              <span className="text-xs text-black w-40 truncate">
+                              <span className="text-xs text-black w-32 truncate">
                                 {className}
                               </span>
 
@@ -422,10 +407,16 @@ export function PressMachineDashboard() {
                             </div>
                           )
                         )}
+
+                        {!autoImage && (
+                          <div className="text-sm text-black/60">
+                            데이터 수신 대기 중...
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
-                )}
+                </div>
               </div>
             </div>
           </div>
@@ -471,7 +462,6 @@ export function PressMachineDashboard() {
                   </div>
                 </div>
 
-                {/* ✅ 차트 2개: domain auto로 -> 변화가 보이게 */}
                 <div>
                   <h4 className="text-sm font-semibold text-black mb-3">
                     센서 데이터 추이 (3개 센서)
@@ -484,10 +474,7 @@ export function PressMachineDashboard() {
                       <LineChart data={sensorHistory}>
                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.12)" />
                         <XAxis dataKey="time" hide />
-                        <YAxis
-                          stroke="rgba(0,0,0,0.9)"
-                          domain={["auto", "auto"]} // ✅ 고정 제거
-                        />
+                        <YAxis stroke="rgba(0,0,0,0.9)" domain={["auto", "auto"]} />
                         <Tooltip
                           contentStyle={{
                             backgroundColor: "#ffffff",
@@ -518,10 +505,7 @@ export function PressMachineDashboard() {
                       <LineChart data={vibrationHistory}>
                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.12)" />
                         <XAxis dataKey="time" hide />
-                        <YAxis
-                          stroke="rgba(0,0,0,0.9)"
-                          domain={["auto", "auto"]} // ✅ 고정 제거
-                        />
+                        <YAxis stroke="rgba(0,0,0,0.9)" domain={["auto", "auto"]} />
                         <Tooltip
                           contentStyle={{
                             backgroundColor: "#ffffff",
@@ -537,16 +521,29 @@ export function PressMachineDashboard() {
                     </ResponsiveContainer>
                   </div>
                 </div>
+
               </div>
             </div>
           </div>
 
-          {/* Bottom: Distribution */}
+          {/* Bottom: Distribution (누적 데이터) */}
           <div className="col-span-12">
             <div className="rounded-2xl border border-black/10 bg-white shadow-sm">
               <div className="px-6 pt-6 pb-4 flex items-center justify-between">
-                <h3 className="font-semibold text-black">결함 유형 분포</h3>
-                <span className="text-xs text-black">(현재는 샘플 랜덤 데이터)</span>
+                <div>
+                  <h3 className="font-semibold text-black">결함 유형 분포</h3>
+                  <span className="text-xs text-black/70">
+                    (이미지 예측 결과의 확률(all_scores)을 누적)
+                  </span>
+                </div>
+
+                <button
+                  onClick={resetDefectDistribution}
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-white hover:bg-black/5 border border-black/15 text-black transition-colors text-sm"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  누적 초기화
+                </button>
               </div>
 
               <div className="px-6 pb-6">
@@ -557,7 +554,6 @@ export function PressMachineDashboard() {
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                       data={defectDistribution}
-                      layout="horizontal"
                       margin={{ left: 20, right: 20, top: 10, bottom: 40 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.12)" />
@@ -588,15 +584,15 @@ export function PressMachineDashboard() {
                         }}
                         labelStyle={{ color: "#000" }}
                       />
-                      <Bar dataKey="value" fill="#f59e0b" radius={[6, 6, 0, 0]} barSize={28} />
+                      <Bar dataKey="value" radius={[6, 6, 0, 0]} barSize={28} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
               </div>
             </div>
           </div>
+
         </div>
-        {/* end grid */}
       </div>
     </div>
   );
