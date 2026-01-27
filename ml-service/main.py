@@ -10,7 +10,6 @@ import uvicorn
 from fastapi.responses import JSONResponse
 
 import press
-import battery
 import windshield
 import engine
 from paint import service as paint_service
@@ -64,7 +63,6 @@ def to_public_url(abs_path: str) -> str:
 def startup_event():
     print("서버 시작: 모델 로딩 중...")
     try:
-        battery.load_battery_models()
         windshield.load_windshield_models()
         engine.load_engine_model()
         global PAINT_CFG
@@ -90,7 +88,6 @@ def read_root():
 def health():
     return {
         "status": "ok",
-        "battery_models_loaded": getattr(battery, "model", None) is not None,
         "windshield_left_loaded": getattr(windshield, "left_model", None) is not None,
         "windshield_right_loaded": getattr(windshield, "right_model", None) is not None,
         "engine_loaded": getattr(engine, "model", None) is not None,
@@ -98,19 +95,6 @@ def health():
         **press.get_press_status(),
         **body_service.get_body_status(),
     }
-
-
-# =========================
-# Battery (기존 유지)
-# =========================
-@app.post("/predict")
-def predict_battery_endpoint(data: battery.BatteryPredictionRequest):
-    try:
-        result = battery.predict_battery_quality(data)
-        return {"prediction": result}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 # =========================
 # Windshield (기존 유지)

@@ -17,8 +17,6 @@ export function Sidebar({ username, onLogout }: SidebarProps) {
     { path: '/engine-vibration', label: '엔진 진동', icon:Cpu },
     { path: '/body', label: '차체 조립', icon: Box },
     { path: '/paint', label: '도장 품질', icon: Droplet },
-    { path: '/battery', label: '배터리 예지보전', icon: Battery },
-    { path: '/facility', label: '설비', icon: Settings },
     { path: '/board', label: '게시판', icon: ClipboardList },
   ];
 

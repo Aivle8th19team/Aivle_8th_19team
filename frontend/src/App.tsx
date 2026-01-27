@@ -9,9 +9,7 @@ import { EngineVibrationDashboard } from './components/EngineVibrationDashboard'
 import { WeldingImageDashboard } from './components/WeldingImageDashboard';
 import { BodyAssemblyDashboard } from './components/BodyAssemblyDashboard';
 import { PaintQualityDashboard } from './components/PaintQualityDashboard';
-import { FacilityDashboard } from './components/FacilityDashboard';
 import { MainDashboard } from './components/MainDashboard';
-import { BatteryDashboard } from './components/BatteryDashboard';
 import { AIChatbot } from './components/AIChatbot';
 import { BoardListPage } from './components/Board/BoardListPage';
 import { BoardWritePage } from './components/Board/BoardWritePage';
@@ -91,8 +89,6 @@ export default function App() {
                 <Route path="/engine-vibration" element={<EngineVibrationDashboard />} />
                 <Route path="/body" element={<BodyAssemblyDashboard />} />
                 <Route path="/paint" element={<PaintQualityDashboard />} />
-                <Route path="/battery" element={<BatteryDashboard />} />
-                <Route path="/facility" element={<FacilityDashboard />} />
 
                 {/* Board Routes */}
                 <Route path="/board" element={<BoardListPage />} />
