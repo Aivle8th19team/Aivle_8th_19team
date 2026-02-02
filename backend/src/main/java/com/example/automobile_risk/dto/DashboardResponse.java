@@ -27,6 +27,10 @@ public class DashboardResponse {
     private DashboardPredictionDto.DeltaSincePrev deltaSincePrev;
     private List<DashboardPredictionDto.PredictionTrendPoint> predictionTrend;
 
+    // Order and Production Summaries
+    private OrderSummary orderSummary;
+    private ProductionSummary productionSummary;
+
     @Getter
     @Setter
     @NoArgsConstructor
@@ -69,5 +73,35 @@ public class DashboardResponse {
         private String process;
         private Double totalDelayHours;
         private Integer eventCount;
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class OrderSummary {
+        private Integer total;
+        private Integer created;
+        private Integer partiallyAllocated;
+        private Integer fullyAllocated;
+        private Integer inProgress;
+        private Integer pending;
+        private Integer completed;
+        private Integer cancelled;
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class ProductionSummary {
+        private Integer total;
+        private Integer planned;
+        private Integer inProgress;
+        private Integer completed;
+        private Integer stopped;
+        private Integer cancelled;
     }
 }

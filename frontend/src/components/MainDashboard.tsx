@@ -76,6 +76,8 @@ interface OrderSummary {
   created: number;
   partiallyAllocated: number;
   fullyAllocated: number;
+  inProgress: number;
+  pending: number;
   completed: number;
   cancelled: number;
 }
@@ -490,18 +492,21 @@ export function MainDashboard() {
   const predictedDeadline = new Date(originalDeadline.getTime() + totalDelayHours * 60 * 60 * 1000);
 
   // ── 주문 요약 계산 (실시간 데이터 기반) ──
+  const partiallyAllocatedCount = orders.filter(o => o.status === 'PARTIALLY_ALLOCATED').length;
+  const fullyAllocatedCount = orders.filter(o => o.status === 'FULLY_ALLOCATED').length;
+  const createdCount = orders.filter(o => o.status === 'CREATED').length;
+  const completedCount = orders.filter(o => o.status === 'COMPLETED').length;
+  const cancelledCount = orders.filter(o => o.status === 'CANCELLED').length;
+
   const computedOrderSummary: OrderSummary = {
     total: orders.length,
-    inProgress: orders.filter(o => 
-      o.status === 'PARTIALLY_ALLOCATED' || 
-      o.status === 'FULLY_ALLOCATED'
-    ).length,
-    completed: orders.filter(o => o.status === 'COMPLETED').length,
-    pending: orders.filter(o => o.status === 'CREATED').length,
-    cancelled: orders.filter(o => o.status === 'CANCELLED').length,
-    averageCompletionRate: orders.length > 0 
-      ? Math.round((orders.filter(o => o.status === 'COMPLETED').length / orders.length) * 100) 
-      : 0,
+    created: createdCount,
+    partiallyAllocated: partiallyAllocatedCount,
+    fullyAllocated: fullyAllocatedCount,
+    inProgress: partiallyAllocatedCount + fullyAllocatedCount,
+    pending: createdCount,
+    completed: completedCount,
+    cancelled: cancelledCount,
   };
 
   // ── 생산 요약 계산 (실시간 데이터 기반, 다양한 상태 처리) ──
@@ -646,9 +651,19 @@ export function MainDashboard() {
     : new Date();
   
   // ── 예측 납기일 계산 (delay-prediction 데이터 활용) ──
-  const predictedDeadlineFromML = currentPrediction?.estimatedDeliveryDate 
-    ? new Date(currentPrediction.estimatedDeliveryDate)
-    : new Date(earliestDeadline.getTime() + totalDelayHours * 60 * 60 * 1000);
+  const predictedDeadlineFromML = (() => {
+    // 1순위: currentPrediction에서 totalDelayHours로 계산
+    const totalDelayH = currentPrediction?.predDelayMaxH ?? totalDelayHours;
+    
+    // 2순위: activePrediction의 maxDelayHours
+    const maxDelayH = activePrediction?.maxDelayHours ?? 0;
+    
+    // 최종 지연시간
+    const finalDelayHours = Math.max(totalDelayH, maxDelayH);
+    
+    // earliestDeadline + 지연시간으로 계산
+    return new Date(earliestDeadline.getTime() + finalDelayHours * 60 * 60 * 1000);
+  })();
 
   // ── 지연 요약 정보 ──
   const productionSummary = {
@@ -659,20 +674,32 @@ export function MainDashboard() {
 
   // ── 주문 상태 분포 차트 데이터 ──
   const orderStatusChart = [
-    { name: '생성', value: resolvedOrderSummary.pending, color: '#94a3b8' },
-    { name: '진행중', value: resolvedOrderSummary.inProgress, color: '#f59e0b' },
-    { name: '완료', value: resolvedOrderSummary.completed, color: '#22c55e' },
-    { name: '취소', value: resolvedOrderSummary.cancelled, color: '#ef4444' },
+    { name: '생성', value: resolvedOrderSummary.created || 0, color: '#94a3b8' },
+    { name: '진행중', value: resolvedOrderSummary.inProgress || 0, color: '#f59e0b' },
+    { name: '완료', value: resolvedOrderSummary.completed || 0, color: '#22c55e' },
+    { name: '취소', value: resolvedOrderSummary.cancelled || 0, color: '#ef4444' },
   ];
+  
+  console.log('[OrderStatusChart]', {
+    total: orders.length,
+    chartData: orderStatusChart,
+    summary: resolvedOrderSummary
+  });
 
   // ── 생산 상태 분포 차트 데이터 ──
   const productionStatusChart = [
-    { name: '계획', value: resolvedProductionSummary.planned, color: '#94a3b8' },
-    { name: '진행중', value: resolvedProductionSummary.inProgress, color: '#f59e0b' },
-    { name: '완료', value: resolvedProductionSummary.completed, color: '#22c55e' },
-    { name: '중단', value: resolvedProductionSummary.stopped, color: '#64748b' },
-    { name: '취소', value: resolvedProductionSummary.cancelled, color: '#ef4444' },
+    { name: '계획', value: resolvedProductionSummary.planned || 0, color: '#94a3b8' },
+    { name: '진행중', value: resolvedProductionSummary.inProgress || 0, color: '#f59e0b' },
+    { name: '완료', value: resolvedProductionSummary.completed || 0, color: '#22c55e' },
+    { name: '중단', value: resolvedProductionSummary.stopped || 0, color: '#64748b' },
+    { name: '취소', value: resolvedProductionSummary.cancelled || 0, color: '#ef4444' },
   ];
+  
+  console.log('[ProductionStatusChart]', {
+    total: productions.length,
+    chartData: productionStatusChart,
+    summary: resolvedProductionSummary
+  });
 
   /** KPI 카드 하단 delta 표시 헬퍼 — delta가 null이면 렌더링하지 않음 */
   const renderDelta = (delta: number | null, unit = '%', positiveIsBad = false) => {
@@ -930,40 +957,130 @@ export function MainDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
         {/* 주문 상태 분포 */}
         <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
-          <h3 className="text-lg font-bold text-gray-900 mb-4">주문 상태 분포</h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={orderStatusChart}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="name" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="value" name="건수">
-                {orderStatusChart.map((entry, index) => (
-                  <Cell key={`cell-order-${index}`} fill={entry.color} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold text-gray-900">주문 상태 분포</h3>
+            <span className="text-sm text-gray-500">총 {resolvedOrderSummary.total}건</span>
+          </div>
+          {resolvedOrderSummary.total > 0 ? (
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart 
+                data={orderStatusChart}
+                margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis 
+                  dataKey="name" 
+                  tick={{ fill: '#6b7280', fontSize: 12 }}
+                  axisLine={{ stroke: '#d1d5db' }}
+                />
+                <YAxis 
+                  tick={{ fill: '#6b7280', fontSize: 12 }}
+                  axisLine={{ stroke: '#d1d5db' }}
+                  allowDecimals={false}
+                />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: '#fff', 
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                  }}
+                  labelStyle={{ fontWeight: 'bold', marginBottom: '4px' }}
+                  formatter={(value: number) => [`${value}건`, '주문 수']}
+                />
+                <Legend 
+                  wrapperStyle={{ paddingTop: '20px' }}
+                  iconType="square"
+                />
+                <Bar 
+                  dataKey="value" 
+                  name="건수"
+                  radius={[8, 8, 0, 0]}
+                  label={{ 
+                    position: 'top', 
+                    fill: '#374151',
+                    fontSize: 12,
+                    fontWeight: 'bold'
+                  }}
+                >
+                  {orderStatusChart.map((entry, index) => (
+                    <Cell key={`cell-order-${index}`} fill={entry.color} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-[300px] flex items-center justify-center text-gray-400">
+              <div className="text-center">
+                <Package className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">주문 데이터가 없습니다</p>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 생산 상태 분포 */}
         <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
-          <h3 className="text-lg font-bold text-gray-900 mb-4">생산 상태 분포</h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={productionStatusChart}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="name" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="value" name="건수">
-                {productionStatusChart.map((entry, index) => (
-                  <Cell key={`cell-production-${index}`} fill={entry.color} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold text-gray-900">생산 상태 분포</h3>
+            <span className="text-sm text-gray-500">총 {resolvedProductionSummary.total}건</span>
+          </div>
+          {resolvedProductionSummary.total > 0 ? (
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart 
+                data={productionStatusChart}
+                margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis 
+                  dataKey="name" 
+                  tick={{ fill: '#6b7280', fontSize: 12 }}
+                  axisLine={{ stroke: '#d1d5db' }}
+                />
+                <YAxis 
+                  tick={{ fill: '#6b7280', fontSize: 12 }}
+                  axisLine={{ stroke: '#d1d5db' }}
+                  allowDecimals={false}
+                />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: '#fff', 
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                  }}
+                  labelStyle={{ fontWeight: 'bold', marginBottom: '4px' }}
+                  formatter={(value: number) => [`${value}건`, '생산 수']}
+                />
+                <Legend 
+                  wrapperStyle={{ paddingTop: '20px' }}
+                  iconType="square"
+                />
+                <Bar 
+                  dataKey="value" 
+                  name="건수"
+                  radius={[8, 8, 0, 0]}
+                  label={{ 
+                    position: 'top', 
+                    fill: '#374151',
+                    fontSize: 12,
+                    fontWeight: 'bold'
+                  }}
+                >
+                  {productionStatusChart.map((entry, index) => (
+                    <Cell key={`cell-production-${index}`} fill={entry.color} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-[300px] flex items-center justify-center text-gray-400">
+              <div className="text-center">
+                <Factory className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">생산 데이터가 없습니다</p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

@@ -49,7 +49,8 @@ class DelayPredictionService:
     def extract_orders(self) -> pd.DataFrame:
         """주문 데이터 추출"""
         if not self.engine:
-            self.connect()
+            if not self.connect():
+                raise ConnectionError("DB 연결에 실패했습니다.")
         
         query = """
             SELECT 
@@ -60,17 +61,29 @@ class DelayPredictionService:
                 o.due_date,
                 o.completed_at,
                 vm.model_name as vehicle_model,
-                EXTRACT(EPOCH FROM (o.completed_at - o.due_date))/3600 as actual_delay_hours
+                CASE 
+                    WHEN o.completed_at IS NOT NULL AND o.due_date IS NOT NULL 
+                    THEN EXTRACT(EPOCH FROM (o.completed_at - o.due_date))/3600 
+                    ELSE 0 
+                END as actual_delay_hours
             FROM orders o
             LEFT JOIN vehicle_models vm ON o.vehicle_model_id = vm.model_id
             ORDER BY o.order_id
         """
-        return pd.read_sql(query, self.engine)
+        try:
+            df = pd.read_sql(query, self.engine)
+            print(f"✓ 주문 데이터 추출 완료: {len(df)}건")
+            return df
+        except Exception as e:
+            print(f"❌ 주문 데이터 추출 실패: {e}")
+            traceback.print_exc()
+            raise
     
     def extract_events(self) -> pd.DataFrame:
         """공정 이벤트 데이터 추출"""
         if not self.engine:
-            self.connect()
+            if not self.connect():
+                raise ConnectionError("DB 연결에 실패했습니다.")
         
         query = """
             SELECT 
@@ -86,7 +99,14 @@ class DelayPredictionService:
             FROM process_events pe
             ORDER BY pe.order_id, pe.created_at
         """
-        return pd.read_sql(query, self.engine)
+        try:
+            df = pd.read_sql(query, self.engine)
+            print(f"✓ 이벤트 데이터 추출 완료: {len(df)}건")
+            return df
+        except Exception as e:
+            print(f"❌ 이벤트 데이터 추출 실패: {e}")
+            traceback.print_exc()
+            raise
     
     def prepare_features(self, orders_df: pd.DataFrame, events_df: pd.DataFrame) -> pd.DataFrame:
         """특성 엔지니어링"""

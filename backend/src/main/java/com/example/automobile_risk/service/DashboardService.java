@@ -14,8 +14,11 @@ import com.example.automobile_risk.repository.DashboardPredictionSnapshotReposit
 import com.example.automobile_risk.repository.ProcessEventRepository;
 import com.example.automobile_risk.repository.ProcessRepository;
 import com.example.automobile_risk.entity.Order;
+import com.example.automobile_risk.entity.Production;
 import com.example.automobile_risk.entity.enumclass.OrderStatus;
+import com.example.automobile_risk.entity.enumclass.ProductionStatus;
 import com.example.automobile_risk.repository.OrderRepository;
+import com.example.automobile_risk.repository.ProductionRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -64,6 +67,7 @@ public class DashboardService {
     private final DefectDelayRuleEngine defectDelayRuleEngine;
     private final DashboardPredictionSnapshotRepository dashboardSnapshotRepository;
     private final OrderRepository orderRepository;
+    private final ProductionRepository productionRepository;
     private final ObjectMapper objectMapper;
 
     // ── ML Cache ──
@@ -282,6 +286,55 @@ public class DashboardService {
             }
         }
 
+        // ── Order Summary (Real-time) ──
+        List<Order> allOrders = orderRepository.findAll();
+        log.info("Found {} total orders", allOrders.size());
+        
+        int createdCount = (int) allOrders.stream().filter(o -> o.getOrderStatus() == OrderStatus.CREATED).count();
+        int partiallyAllocatedCount = (int) allOrders.stream().filter(o -> o.getOrderStatus() == OrderStatus.PARTIALLY_ALLOCATED).count();
+        int fullyAllocatedCount = (int) allOrders.stream().filter(o -> o.getOrderStatus() == OrderStatus.FULLY_ALLOCATED).count();
+        int completedCount = (int) allOrders.stream().filter(o -> o.getOrderStatus() == OrderStatus.COMPLETED).count();
+        int cancelledCount = (int) allOrders.stream().filter(o -> o.getOrderStatus() == OrderStatus.CANCELLED).count();
+        
+        DashboardResponse.OrderSummary orderSummary = DashboardResponse.OrderSummary.builder()
+                .total(allOrders.size())
+                .created(createdCount)
+                .partiallyAllocated(partiallyAllocatedCount)
+                .fullyAllocated(fullyAllocatedCount)
+                .inProgress(partiallyAllocatedCount + fullyAllocatedCount)
+                .pending(createdCount)
+                .completed(completedCount)
+                .cancelled(cancelledCount)
+                .build();
+                
+        log.info("Order Summary: total={}, created={}, inProgress={}, completed={}, cancelled={}", 
+                orderSummary.getTotal(), orderSummary.getCreated(), 
+                orderSummary.getInProgress(), orderSummary.getCompleted(), orderSummary.getCancelled());
+
+        // ── Production Summary (Real-time) ──
+        List<Production> allProductions = productionRepository.findAll();
+        log.info("Found {} total productions", allProductions.size());
+        
+        int plannedCount = (int) allProductions.stream().filter(p -> p.getProductionStatus() == ProductionStatus.PLANNED).count();
+        int inProgressCount = (int) allProductions.stream().filter(p -> p.getProductionStatus() == ProductionStatus.IN_PROGRESS).count();
+        int prodCompletedCount = (int) allProductions.stream().filter(p -> p.getProductionStatus() == ProductionStatus.COMPLETED).count();
+        int stoppedCount = (int) allProductions.stream().filter(p -> p.getProductionStatus() == ProductionStatus.STOPPED).count();
+        int prodCancelledCount = (int) allProductions.stream().filter(p -> p.getProductionStatus() == ProductionStatus.CANCELLED).count();
+        
+        DashboardResponse.ProductionSummary productionSummary = DashboardResponse.ProductionSummary.builder()
+                .total(allProductions.size())
+                .planned(plannedCount)
+                .inProgress(inProgressCount)
+                .completed(prodCompletedCount)
+                .stopped(stoppedCount)
+                .cancelled(prodCancelledCount)
+                .build();
+                
+        log.info("Production Summary: total={}, planned={}, inProgress={}, completed={}, stopped={}, cancelled={}", 
+                productionSummary.getTotal(), productionSummary.getPlanned(), 
+                productionSummary.getInProgress(), productionSummary.getCompleted(), 
+                productionSummary.getStopped(), productionSummary.getCancelled());
+
         // ── ML prediction DTO + snapshot (only on fresh ML result) ──
         DashboardPredictionDto.CurrentPrediction currentPrediction = null;
         DashboardPredictionDto.DeltaSincePrev deltaSincePrev = null;
@@ -376,8 +429,8 @@ public class DashboardService {
                 .overallRiskLevel(overallRiskLevel)
                 .currentPrediction(currentPrediction)
                 .deltaSincePrev(deltaSincePrev)
-                .predictionTrend(predictionTrend)
-                .build();
+                .predictionTrend(predictionTrend)                .orderSummary(orderSummary)
+                .productionSummary(productionSummary)                .build();
     }
 
     private String resolveOriginalDeadline() {
