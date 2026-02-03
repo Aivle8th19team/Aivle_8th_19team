@@ -44,3 +44,29 @@ __pycache__/
 .venv
 venv
 .ipynb_checkpoints
+
+# ML models
+*.keras
+
+# Image
+model/detect/val_predictions/
+ml-service/body_assembly/runs
+ml-service/body_assembly/samples
+ml-service/paint/detect
+ml-service/paint/sample_images
+ml-service/press/sample_images
+ml-service/temp
+ml-service/welding_image/runs
+ml-service/welding_image/sample_images
+
+# Node
+node_modules/
+
+# backend
+# backend/src/main/resources/application.properties
+# backend/src/main/resources/application-prod.properties
+
+# Local Tests
+test_*.py
+test_press.py
+test_simulation_integration.py

@@ -4,3 +4,7 @@ scikit-learn
 pandas
 joblib
 numpy
+python-multipart
+tensorflow
+liac-arff
+ultralytics
