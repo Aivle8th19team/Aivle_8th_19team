@@ -57,5 +57,13 @@ cd backend
 export SPRING_PROFILES_ACTIVE=local
 ./gradlew bootRun        # Windows는 gradlew.bat bootRun
 ```
-데이터소스 설정과 포트는 [backend/src/main/resources/application.properties](backend/src/main/resources/application.properties)에서 관리합니다 (기본: PostgreSQL, server.port=3001, context-path=/).
-  
+### Digital Twin (3D Simulator)
+```bash
+cd ../digital-twin-automotive/frontend
+npm install
+npm run dev
+# Frontend: http://localhost:5173
+```
+- **3D 시각화**: React + Three.js 기반의 독립형 공정 시뮬레이터.
+- **연동**: 메인 대시보드(3001)의 '디지털 트윈' 메뉴를 통해 접근 가능.
+

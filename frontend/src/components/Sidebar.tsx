@@ -13,6 +13,7 @@ import {
   ArrowLeftRight,
   Hammer,
   Zap,
+  MonitorPlay,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -42,6 +43,7 @@ export function Sidebar({ username, onLogout }: SidebarProps) {
   const processMenuItems = useMemo(
     () => [
       { path: "/dashboard", label: "메인 대시보드", icon: LayoutDashboard },
+      { path: "http://localhost:5173", label: "디지털 트윈 (3D)", icon: MonitorPlay },
       { path: "/press", label: "프레스 머신", icon: Hammer },
       { path: "/welding-image", label: "용접(이미지)", icon: Zap },
       { path: "/windshield", label: "윈드실드", icon: ShieldCheck },
@@ -109,14 +111,29 @@ export function Sidebar({ username, onLogout }: SidebarProps) {
         {menuItems.map((item) => {
           const Icon = item.icon;
           const selected = isActive(item.path);
+          const isExternal = item.path.startsWith('http');
+
+          if (isExternal) {
+            return (
+              <a
+                key={item.path}
+                href={item.path}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-lg mb-2 transition-colors text-slate-300 hover:bg-slate-800"
+              >
+                <Icon className="w-5 h-5" />
+                <span>{item.label}</span>
+              </a>
+            );
+          }
 
           return (
             <Link
               key={item.path}
               to={item.path}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg mb-2 transition-colors ${
-                selected ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800"
-              }`}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg mb-2 transition-colors ${selected ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800"
+                }`}
             >
               <Icon className="w-5 h-5" />
               <span>{item.label}</span>
@@ -144,7 +161,7 @@ export function Sidebar({ username, onLogout }: SidebarProps) {
           <LogOut className="w-5 h-5" />
           <span>로그아웃</span>
         </button>
-        
+
         <div className="space-y-1 mb-3">
           <Link
             to="/terms"
@@ -164,6 +181,6 @@ export function Sidebar({ username, onLogout }: SidebarProps) {
           마지막 업데이트: {new Date().toLocaleTimeString("ko-KR")}
         </div>
       </div>
-    </aside>
+    </aside >
   );
 }

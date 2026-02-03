@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { AlertTriangle, CheckCircle, Clock, TrendingUp, Calendar, AlertCircle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Clock, TrendingUp, Calendar, AlertCircle, RefreshCw, Box } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   LineChart, Line, PieChart, Pie, Cell
@@ -242,7 +242,7 @@ export function MainDashboard() {
     if (isSimMode) {
       // In simulation mode, close SSE and stop polling
       if (esRef.current) {
-        try { esRef.current.close(); } catch {}
+        try { esRef.current.close(); } catch { }
         esRef.current = null;
       }
       if (pollRef.current) {
@@ -296,7 +296,7 @@ export function MainDashboard() {
 
         es.onerror = () => {
           console.warn('SSE error — keep polling fallback');
-          try { es.close(); } catch {}
+          try { es.close(); } catch { }
           esRef.current = null;
           setUseSSE(false);
         };
@@ -308,7 +308,7 @@ export function MainDashboard() {
 
     return () => {
       if (esRef.current) {
-        try { esRef.current.close(); } catch {}
+        try { esRef.current.close(); } catch { }
         esRef.current = null;
       }
       if (pollRef.current) {
@@ -506,6 +506,16 @@ export function MainDashboard() {
             <span className="text-xs text-gray-600">시뮬레이션</span>
             <Switch checked={isSimMode} onCheckedChange={handleModeSwitch} />
           </label>
+
+          <a
+            href="http://localhost:5173"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-medium"
+          >
+            <Box className="w-3.5 h-3.5" />
+            <span>3D 디지털 트윈 열기</span>
+          </a>
 
           {!isSimMode && currentPrediction && (
             <div className="flex items-center gap-2 text-xs text-gray-500">
